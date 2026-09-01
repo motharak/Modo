@@ -69,6 +69,19 @@ class BeltaMediaService : MediaSessionService() {
             player.pause()
         }
 
+        // Connect auxiliary reverb callback to player
+        equalizerEngine.onAuxReverbChanged = { auxId, level ->
+            try {
+                if (auxId != null && level > 0f) {
+                    player.setAuxEffectInfo(androidx.media3.common.AuxEffectInfo(auxId, level))
+                } else {
+                    player.clearAuxEffectInfo()
+                }
+            } catch (e: Exception) {
+                DebugLogger.e(LogCategory.DSP_EQUALIZER, "REVERB", "Failed to update player aux reverb: ${e.message}")
+            }
+        }
+
         // Configure audiophile ExoPlayer with universal codec support for ALAC, AAC, FLAC via native FFmpeg
         val renderersFactory = object : DefaultRenderersFactory(this@BeltaMediaService) {
             override fun buildAudioRenderers(
@@ -123,11 +136,28 @@ class BeltaMediaService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
+        // Eagerly initialize audio effects if session ID is already allocated by ExoPlayer
+        val initialSessionId = player.audioSessionId
+        if (initialSessionId != C.AUDIO_SESSION_ID_UNSET && initialSessionId != 0) {
+            equalizerEngine.initAudioEffects(initialSessionId)
+        }
+
         crossfadeManager.attachPlayer(player)
 
         player.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
-                equalizerEngine.initAudioEffects(audioSessionId)
+                if (audioSessionId != C.AUDIO_SESSION_ID_UNSET && audioSessionId != 0) {
+                    equalizerEngine.initAudioEffects(audioSessionId)
+                }
+            }
+
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY) {
+                    val sessionId = player.audioSessionId
+                    if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != 0 && !equalizerEngine.isInitialized) {
+                        equalizerEngine.initAudioEffects(sessionId)
+                    }
+                }
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -203,6 +233,7 @@ class BeltaMediaService : MediaSessionService() {
     override fun onDestroy() {
         unregisterReceiver(becomingNoisyReceiver)
         equalizerEngine.releaseAudioEffects()
+        equalizerEngineInstance = null
         mediaSession?.run {
             player.release()
             release()

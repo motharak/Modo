@@ -230,6 +230,10 @@ class AudioEngineController(
         _playbackState.update { it.copy(crossfadeDurationSeconds = seconds) }
     }
 
+    fun setReplayGainEnabled(enabled: Boolean) {
+        _playbackState.update { it.copy(isReplayGainEnabled = enabled) }
+    }
+
     fun release() {
         stopProgressTicker()
         MediaController.releaseFuture(controllerFuture ?: return)

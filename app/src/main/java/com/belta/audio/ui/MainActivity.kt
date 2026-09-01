@@ -87,6 +87,7 @@ import com.belta.audio.ui.screens.search.SearchScreen
 import com.belta.audio.ui.screens.settings.SettingsScreen
 import com.belta.audio.ui.screens.smartplaylist.SmartPlaylistScreen
 import com.belta.audio.ui.screens.tageditor.TagEditorScreen
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
@@ -168,6 +169,26 @@ fun MainAppContent(
     var editingTrack by remember { mutableStateOf<Track?>(null) }
     var currentEqPreset by remember { mutableStateOf(EqualizerPreset.FLAT) }
     var showFolderDialog by remember { mutableStateOf(false) }
+
+    val eqEngine = BeltaMediaService.equalizerEngineInstance
+    val bandFrequencies by (eqEngine?.bandFrequencies ?: remember { MutableStateFlow(listOf("60Hz", "230Hz", "910Hz", "3.6kHz", "14kHz")) }).collectAsState()
+    val enginePreset by (eqEngine?.presetState ?: remember { MutableStateFlow(EqualizerPreset.FLAT) }).collectAsState()
+    val isDspEnabled by (eqEngine?.enabledState ?: remember { MutableStateFlow(sharedPreferences.getBoolean("dsp_effects_enabled", true)) }).collectAsState()
+
+    // Restore saved equalizer preset, master DSP switch, and replay gain on startup
+    LaunchedEffect(eqPresets) {
+        if (eqPresets.isNotEmpty()) {
+            val savedPresetName = sharedPreferences.getString("selected_eq_preset_name", EqualizerPreset.FLAT.name)
+            val matched = eqPresets.find { it.name == savedPresetName } ?: EqualizerPreset.FLAT
+            currentEqPreset = matched
+            BeltaMediaService.equalizerEngineInstance?.applyPreset(matched)
+            val dspSaved = sharedPreferences.getBoolean("dsp_effects_enabled", true)
+            BeltaMediaService.equalizerEngineInstance?.setEffectsEnabled(dspSaved)
+            val replayGainSaved = sharedPreferences.getBoolean("replay_gain_enabled", true)
+            app.audioEngineController.setReplayGainEnabled(replayGainSaved)
+            BeltaMediaService.equalizerEngineInstance?.setReplayGainEnabled(replayGainSaved)
+        }
+    }
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -416,38 +437,43 @@ fun MainAppContent(
                 composable("equalizer") {
                     EqualizerScreen(
                         presets = eqPresets,
-                        currentPreset = currentEqPreset,
+                        currentPreset = enginePreset,
                         isReplayGainEnabled = playbackState.isReplayGainEnabled,
+                        isEffectsEnabled = isDspEnabled,
+                        bandFrequencies = bandFrequencies,
+                        onEffectsEnabledToggle = { enabled ->
+                            sharedPreferences.edit().putBoolean("dsp_effects_enabled", enabled).apply()
+                            BeltaMediaService.equalizerEngineInstance?.setEffectsEnabled(enabled)
+                        },
                         onPresetSelect = { preset ->
                             currentEqPreset = preset
+                            sharedPreferences.edit().putString("selected_eq_preset_name", preset.name).apply()
                             BeltaMediaService.equalizerEngineInstance?.applyPreset(preset)
                         },
                         onBandGainChange = { index, gain ->
-                            val updated = currentEqPreset.bandGains.toMutableList()
-                            if (index < updated.size) updated[index] = gain
-                            currentEqPreset = currentEqPreset.copy(bandGains = updated, isCustom = true)
                             BeltaMediaService.equalizerEngineInstance?.setBandGain(index, gain)
                         },
                         onBassBoostChange = { boost ->
-                            currentEqPreset = currentEqPreset.copy(bassBoost = boost, isCustom = true)
                             BeltaMediaService.equalizerEngineInstance?.setBassBoost(boost)
                         },
                         onVirtualizerChange = { virt ->
-                            currentEqPreset = currentEqPreset.copy(virtualizer = virt, isCustom = true)
                             BeltaMediaService.equalizerEngineInstance?.setVirtualizer(virt)
                         },
                         onReverbStageChange = { stage ->
-                            currentEqPreset = currentEqPreset.copy(reverbStage = stage, isCustom = true)
                             BeltaMediaService.equalizerEngineInstance?.setReverbSoundStage(stage)
                         },
                         onReplayGainToggle = { enabled ->
+                            app.audioEngineController.setReplayGainEnabled(enabled)
+                            sharedPreferences.edit().putBoolean("replay_gain_enabled", enabled).apply()
                             BeltaMediaService.equalizerEngineInstance?.setReplayGainEnabled(enabled)
                         },
                         onSaveCustomPreset = { name ->
                             scope.launch {
-                                val newPreset = currentEqPreset.copy(id = 0, name = name, isCustom = true)
+                                val activePreset = BeltaMediaService.equalizerEngineInstance?.presetState?.value ?: currentEqPreset
+                                val newPreset = activePreset.copy(id = 0, name = name, isCustom = true)
                                 val newId = app.playlistRepository.saveEqualizerPreset(newPreset)
                                 currentEqPreset = newPreset.copy(id = newId)
+                                sharedPreferences.edit().putString("selected_eq_preset_name", name).apply()
                                 Toast.makeText(context, "Saved sound profile: $name", Toast.LENGTH_SHORT).show()
                             }
                         },
@@ -470,6 +496,11 @@ fun MainAppContent(
                         scanFoldersCount = scanFolders.size,
                         onThemeChange = onThemeChange,
                         onCrossfadeChange = { app.audioEngineController.setCrossfadeDuration(it) },
+                        onReplayGainToggle = { enabled ->
+                            app.audioEngineController.setReplayGainEnabled(enabled)
+                            sharedPreferences.edit().putBoolean("replay_gain_enabled", enabled).apply()
+                            BeltaMediaService.equalizerEngineInstance?.setReplayGainEnabled(enabled)
+                        },
                         onOpenFolderManager = { showFolderDialog = true },
                         onRescanLibrary = {
                             scope.launch {

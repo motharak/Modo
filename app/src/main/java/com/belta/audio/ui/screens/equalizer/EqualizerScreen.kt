@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -24,7 +23,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.SurroundSound
@@ -36,7 +34,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -53,12 +50,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.belta.audio.core.domain.model.EqualizerPreset
 import com.belta.audio.core.domain.model.ReverbSoundStage
 
@@ -68,6 +64,9 @@ fun EqualizerScreen(
     presets: List<EqualizerPreset>,
     currentPreset: EqualizerPreset,
     isReplayGainEnabled: Boolean,
+    isEffectsEnabled: Boolean = true,
+    bandFrequencies: List<String> = emptyList(),
+    onEffectsEnabledToggle: (Boolean) -> Unit = {},
     onPresetSelect: (EqualizerPreset) -> Unit,
     onBandGainChange: (Int, Int) -> Unit,
     onBassBoostChange: (Int) -> Unit,
@@ -79,7 +78,12 @@ fun EqualizerScreen(
     onBackClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val bandFrequencies = listOf("31Hz", "62Hz", "125Hz", "250Hz", "500Hz", "1kHz", "2kHz", "4kHz", "8kHz", "16kHz")
+    val activeBands = if (bandFrequencies.isNotEmpty()) {
+        bandFrequencies
+    } else {
+        listOf("60Hz", "230Hz", "910Hz", "3.6kHz", "14kHz")
+    }
+
     var showSaveDialog by remember { mutableStateOf(false) }
     var newProfileName by remember { mutableStateOf("") }
 
@@ -124,8 +128,55 @@ fun EqualizerScreen(
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 140.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // 0. Master DSP Bypass / Enable Switch Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isEffectsEnabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Icon(
+                            Icons.Default.GraphicEq,
+                            contentDescription = null,
+                            tint = if (isEffectsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "DSP & Equalizer Engine",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isEffectsEnabled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (isEffectsEnabled) "Active • Real-time hardware audio filtering" else "Bypassed • Pure untouched audio output",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isEffectsEnabled) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = isEffectsEnabled,
+                        onCheckedChange = onEffectsEnabledToggle
+                    )
+                }
+            }
+
             // 1. Preset Selector Chips (Pre-built & User Custom)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier.alpha(if (isEffectsEnabled) 1f else 0.55f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -154,7 +205,7 @@ fun EqualizerScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable { onPresetSelect(preset) }
+                                .clickable(enabled = isEffectsEnabled) { onPresetSelect(preset) }
                                 .padding(horizontal = 14.dp, vertical = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
@@ -204,7 +255,7 @@ fun EqualizerScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Save your 10-band EQ, bass, and reverb settings",
+                            text = "Save your ${activeBands.size}-band EQ, bass, and reverb settings",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -224,7 +275,9 @@ fun EqualizerScreen(
 
             // 3. Environmental Reverb & Sound Stages (Concert Hall, Auditorium, Room, Plate)
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .alpha(if (isEffectsEnabled) 1f else 0.55f),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
@@ -257,7 +310,7 @@ fun EqualizerScreen(
                             Card(
                                 modifier = Modifier
                                     .width(170.dp)
-                                    .clickable { onReverbStageChange(stage) },
+                                    .clickable(enabled = isEffectsEnabled) { onReverbStageChange(stage) },
                                 shape = RoundedCornerShape(12.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
@@ -284,9 +337,11 @@ fun EqualizerScreen(
                 }
             }
 
-            // 4. 10-Band EQ Graphic Section
+            // 4. Hardware Graphic Frequency Response Section
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .alpha(if (isEffectsEnabled) 1f else 0.55f),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
@@ -295,14 +350,14 @@ fun EqualizerScreen(
                         Icon(Icons.Default.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "10-Band Frequency Response",
+                            text = "${activeBands.size}-Band Frequency Response",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    bandFrequencies.forEachIndexed { index, freq ->
+                    activeBands.forEachIndexed { index, freq ->
                         val gain = currentPreset.bandGains.getOrElse(index) { 0 }
                         Row(
                             modifier = Modifier
@@ -313,13 +368,14 @@ fun EqualizerScreen(
                             Text(
                                 text = freq,
                                 style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.width(52.dp)
+                                modifier = Modifier.width(56.dp)
                             )
                             Slider(
                                 value = gain.toFloat(),
                                 onValueChange = { onBandGainChange(index, it.toInt()) },
                                 valueRange = -10f..10f,
                                 steps = 19,
+                                enabled = isEffectsEnabled,
                                 modifier = Modifier.weight(1f),
                                 colors = SliderDefaults.colors(
                                     thumbColor = MaterialTheme.colorScheme.primary,
@@ -339,7 +395,9 @@ fun EqualizerScreen(
 
             // 5. Audio Enhancement Knobs: Bass Boost, Virtualizer & ReplayGain
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .alpha(if (isEffectsEnabled) 1f else 0.55f),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
@@ -367,6 +425,7 @@ fun EqualizerScreen(
                             value = currentPreset.bassBoost.toFloat(),
                             onValueChange = { onBassBoostChange(it.toInt()) },
                             valueRange = 0f..1000f,
+                            enabled = isEffectsEnabled,
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -384,6 +443,7 @@ fun EqualizerScreen(
                             value = currentPreset.virtualizer.toFloat(),
                             onValueChange = { onVirtualizerChange(it.toInt()) },
                             valueRange = 0f..1000f,
+                            enabled = isEffectsEnabled,
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
