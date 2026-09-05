@@ -84,6 +84,9 @@ import com.belta.audio.ui.components.DefaultArtwork
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import com.belta.audio.core.debug.DebugLogger
+import com.belta.audio.core.debug.LogCategory
+import android.widget.Toast
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -91,7 +94,7 @@ fun SmartPlaylistScreen(
     allTracks: List<Track>,
     userSmartPlaylists: List<Playlist>,
     onPlayTracks: (List<Track>) -> Unit,
-    onCreateCustomSmartPlaylist: (String, String, String) -> Unit,
+    onCreateCustomSmartPlaylist: (String, String, String, List<Long>) -> Unit = { _, _, _, _ -> },
     onDeletePlaylist: (Long) -> Unit,
     onBackClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -370,9 +373,20 @@ fun SmartPlaylistScreen(
                                         OutlinedButton(
                                             onClick = {
                                                 if (!isSaved) {
-                                                    val ruleJson = Json.encodeToString(result.ruleDefinition)
-                                                    onCreateCustomSmartPlaylist(result.name, result.description, ruleJson)
-                                                    isSaved = true
+                                                    try {
+                                                        val ruleJson = try {
+                                                            Json.encodeToString(result.ruleDefinition)
+                                                        } catch (e: Exception) {
+                                                            DebugLogger.e(LogCategory.DATABASE, "SMART_PLAYLIST", "Fallback serialization: ${e.message}")
+                                                            "{}"
+                                                        }
+                                                        val trackIds = result.matchedTracks.map { it.id }
+                                                        onCreateCustomSmartPlaylist(result.name, result.description, ruleJson, trackIds)
+                                                        isSaved = true
+                                                    } catch (e: Exception) {
+                                                        DebugLogger.e(LogCategory.DATABASE, "SMART_PLAYLIST", "Error saving smart playlist: ${e.message}")
+                                                        Toast.makeText(context, "Could not save playlist: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                    }
                                                 }
                                             },
                                             shape = RoundedCornerShape(12.dp),

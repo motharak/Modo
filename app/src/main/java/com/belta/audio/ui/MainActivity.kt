@@ -101,6 +101,8 @@ import com.belta.audio.ui.screens.tageditor.TagEditorScreen
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import com.belta.audio.core.debug.DebugLogger
+import com.belta.audio.core.debug.LogCategory
 
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
@@ -509,21 +511,33 @@ fun MainAppContent(
                                 Toast.makeText(context, "No tracks matching this mix", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        onCreateCustomSmartPlaylist = { name, desc, ruleJson ->
+                        onCreateCustomSmartPlaylist = { name, desc, ruleJson, trackIds ->
                             scope.launch {
-                                app.playlistRepository.createPlaylist(
-                                    name = name,
-                                    description = desc,
-                                    isSmart = true,
-                                    smartRuleJson = ruleJson
-                                )
-                                Toast.makeText(context, "Created smart mix: $name", Toast.LENGTH_SHORT).show()
+                                try {
+                                    val playlistId = app.playlistRepository.createPlaylist(
+                                        name = name,
+                                        description = desc,
+                                        isSmart = true,
+                                        smartRuleJson = ruleJson
+                                    )
+                                    if (trackIds.isNotEmpty()) {
+                                        app.playlistRepository.addTracksToPlaylist(playlistId, trackIds)
+                                    }
+                                    Toast.makeText(context, "Saved AI playlist: $name", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    DebugLogger.e(LogCategory.DATABASE, "SMART_PLAYLIST", "Error saving smart playlist: ${e.message}")
+                                    Toast.makeText(context, "Error saving playlist: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
                             }
                         },
                         onDeletePlaylist = { id ->
                             scope.launch {
-                                app.playlistRepository.deletePlaylist(id)
-                                Toast.makeText(context, "Deleted mix", Toast.LENGTH_SHORT).show()
+                                try {
+                                    app.playlistRepository.deletePlaylist(id)
+                                    Toast.makeText(context, "Deleted mix", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Error deleting mix: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
                             }
                         },
                         onBackClick = null
