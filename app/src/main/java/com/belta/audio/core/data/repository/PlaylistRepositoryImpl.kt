@@ -17,8 +17,8 @@ class PlaylistRepositoryImpl(
 ) : PlaylistRepository {
 
     override fun getAllPlaylistsFlow(): Flow<List<Playlist>> {
-        return playlistDao.getAllPlaylistsFlow().map { list ->
-            list.map { it.toDomain() }
+        return playlistDao.getAllPlaylistsWithCountFlow().map { list ->
+            list.map { it.playlist.toDomain(it.songCount) }
         }
     }
 
@@ -38,6 +38,10 @@ class PlaylistRepositoryImpl(
         return playlistDao.getTracksForPlaylistFlow(playlistId).map { list ->
             list.map { it.toDomain() }
         }
+    }
+
+    override suspend fun getTracksForPlaylist(playlistId: Long): List<Track> {
+        return playlistDao.getTracksForPlaylist(playlistId).map { it.toDomain() }
     }
 
     override suspend fun getPlaylistById(id: Long): Playlist? {

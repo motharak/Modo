@@ -1,6 +1,7 @@
 package com.belta.audio.core.data.database.dao
 
 import androidx.room.Dao
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -11,8 +12,22 @@ import com.belta.audio.core.data.database.entity.PlaylistItemEntity
 import com.belta.audio.core.data.database.entity.TrackEntity
 import kotlinx.coroutines.flow.Flow
 
+data class PlaylistWithSongCount(
+    @Embedded val playlist: PlaylistEntity,
+    val songCount: Int
+)
+
 @Dao
 interface PlaylistDao {
+
+    @Query("""
+        SELECT p.*, COUNT(pi.trackId) AS songCount
+        FROM playlists p
+        LEFT JOIN playlist_items pi ON p.id = pi.playlistId
+        GROUP BY p.id
+        ORDER BY p.isSmart DESC, p.name COLLATE NOCASE ASC
+    """)
+    fun getAllPlaylistsWithCountFlow(): Flow<List<PlaylistWithSongCount>>
 
     @Query("SELECT * FROM playlists ORDER BY isSmart DESC, name COLLATE NOCASE ASC")
     fun getAllPlaylistsFlow(): Flow<List<PlaylistEntity>>

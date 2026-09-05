@@ -94,6 +94,7 @@ fun SmartPlaylistScreen(
     allTracks: List<Track>,
     userSmartPlaylists: List<Playlist>,
     onPlayTracks: (List<Track>) -> Unit,
+    onPlayPlaylist: ((Playlist) -> Unit)? = null,
     onCreateCustomSmartPlaylist: (String, String, String, List<Long>) -> Unit = { _, _, _, _ -> },
     onDeletePlaylist: (Long) -> Unit,
     onBackClick: (() -> Unit)? = null,
@@ -547,20 +548,22 @@ fun SmartPlaylistScreen(
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold
                                         )
-                                        playlist.description?.let { desc ->
-                                            Text(
-                                                text = desc,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
+                                        val countText = "${playlist.songCount} tracks"
+                                        val subText = if (!playlist.description.isNullOrBlank()) "$countText • ${playlist.description}" else countText
+                                        Text(
+                                            text = subText,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                     }
 
                                     IconButton(
                                         onClick = {
-                                            if (playlist.smartRuleJson != null) {
+                                            if (onPlayPlaylist != null) {
+                                                onPlayPlaylist(playlist)
+                                            } else if (playlist.smartRuleJson != null) {
                                                 try {
                                                     val def = Json.decodeFromString<com.belta.audio.core.domain.model.SmartRuleDefinition>(playlist.smartRuleJson)
                                                     val matched = com.belta.audio.core.domain.smartengine.SmartPlaylistEngine.evaluate(allTracks, def)

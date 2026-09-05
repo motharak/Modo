@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -37,13 +38,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -61,9 +66,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -90,6 +97,7 @@ import com.belta.audio.ui.components.DefaultArtwork
 import com.belta.audio.ui.components.PlaylistRemixFlowSheet
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.ButtonDefaults
+import kotlinx.serialization.json.Json
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -104,6 +112,10 @@ fun HomeScreen(
     onArtistClick: (Artist) -> Unit = {},
     onFolderClick: (Folder) -> Unit = {},
     onPlaylistClick: (Playlist) -> Unit = {},
+    onGetPlaylistTracks: suspend (Long) -> List<Track> = { emptyList() },
+    onCreatePlaylist: ((String, String) -> Unit)? = null,
+    onDeletePlaylist: ((Long) -> Unit)? = null,
+    onAddTrackToPlaylist: ((Long, Long) -> Unit)? = null,
     onUpdatePlaylist: ((Playlist) -> Unit)? = null,
     globalCrossfadeSeconds: Int = 3,
     onEditTagClick: (Track) -> Unit,
@@ -119,6 +131,29 @@ fun HomeScreen(
     var activeDetailFolder by remember { mutableStateOf<Folder?>(null) }
     var activeDetailPlaylist by remember { mutableStateOf<Playlist?>(null) }
     var showRemixSheetForPlaylist by remember { mutableStateOf<Playlist?>(null) }
+
+    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    var trackToAddToPlaylist by remember { mutableStateOf<Track?>(null) }
+    var playlistTracks by remember(activeDetailPlaylist) { mutableStateOf<List<Track>>(emptyList()) }
+    var isLoadingPlaylistTracks by remember(activeDetailPlaylist) { mutableStateOf(false) }
+
+    LaunchedEffect(activeDetailPlaylist) {
+        val pl = activeDetailPlaylist
+        if (pl != null) {
+            isLoadingPlaylistTracks = true
+            var loaded = onGetPlaylistTracks(pl.id)
+            if (loaded.isEmpty() && !pl.smartRuleJson.isNullOrBlank()) {
+                try {
+                    val def = Json.decodeFromString<com.belta.audio.core.domain.model.SmartRuleDefinition>(pl.smartRuleJson)
+                    loaded = com.belta.audio.core.domain.smartengine.SmartPlaylistEngine.evaluate(tracks, def)
+                } catch (_: Exception) {}
+            }
+            playlistTracks = loaded
+            isLoadingPlaylistTracks = false
+        } else {
+            playlistTracks = emptyList()
+        }
+    }
 
     val isDetailOpen = activeDetailAlbum != null || activeDetailArtist != null || activeDetailFolder != null || activeDetailPlaylist != null
 
@@ -239,10 +274,20 @@ fun HomeScreen(
                 label = "TabContentAnimation"
             ) { tabIndex ->
                 when (tabIndex) {
-                    0 -> TrackListView(tracks = filteredTracks, onTrackClick = { onTrackClick(it, filteredTracks) }, onEditTagClick = onEditTagClick)
+                    0 -> TrackListView(
+                        tracks = filteredTracks,
+                        onTrackClick = { onTrackClick(it, filteredTracks) },
+                        onEditTagClick = onEditTagClick,
+                        onAddToPlaylistClick = { trackToAddToPlaylist = it }
+                    )
                     1 -> AlbumGridView(albums = filteredAlbums, onAlbumClick = { activeDetailAlbum = it })
                     2 -> ArtistListView(artists = filteredArtists, onArtistClick = { activeDetailArtist = it })
-                    3 -> PlaylistListView(playlists = playlists, onPlaylistClick = { activeDetailPlaylist = it })
+                    3 -> PlaylistListView(
+                        playlists = playlists,
+                        onPlaylistClick = { activeDetailPlaylist = it },
+                        onCreatePlaylistClick = { showCreatePlaylistDialog = true },
+                        onDeletePlaylistClick = onDeletePlaylist
+                    )
                     4 -> FolderListView(folders = folders, onFolderClick = { activeDetailFolder = it })
                 }
             }
@@ -285,6 +330,7 @@ fun HomeScreen(
                     if (albumTracks.isNotEmpty()) onTrackClick(albumTracks.shuffled().first(), albumTracks.shuffled())
                 },
                 onEditTagClick = onEditTagClick,
+                onAddToPlaylistClick = { track -> trackToAddToPlaylist = track },
                 onBackClick = { activeDetailAlbum = null }
             )
         }
@@ -308,6 +354,7 @@ fun HomeScreen(
                     if (artistTracks.isNotEmpty()) onTrackClick(artistTracks.shuffled().first(), artistTracks.shuffled())
                 },
                 onEditTagClick = onEditTagClick,
+                onAddToPlaylistClick = { track -> trackToAddToPlaylist = track },
                 onBackClick = { activeDetailArtist = null }
             )
         }
@@ -330,6 +377,7 @@ fun HomeScreen(
                     if (folderTracks.isNotEmpty()) onTrackClick(folderTracks.shuffled().first(), folderTracks.shuffled())
                 },
                 onEditTagClick = onEditTagClick,
+                onAddToPlaylistClick = { track -> trackToAddToPlaylist = track },
                 onBackClick = { activeDetailFolder = null }
             )
         }
@@ -341,20 +389,31 @@ fun HomeScreen(
             CollectionDetailView(
                 title = playlist.name,
                 subtitle = playlist.description.ifEmpty { "Custom Playlist" },
-                badge = "${playlist.songCount} tracks • $flowLabel",
-                artworkUri = null,
-                tracks = tracks,
-                onTrackClick = { track -> onTrackClick(track, tracks) },
+                badge = "${playlistTracks.size} tracks • $flowLabel",
+                artworkUri = playlistTracks.firstOrNull { !it.artworkUri.isNullOrBlank() }?.artworkUri,
+                tracks = playlistTracks,
+                onTrackClick = { track ->
+                    onPlaylistClick(playlist)
+                    onTrackClick(track, playlistTracks)
+                },
                 onPlayAllClick = {
-                    if (tracks.isNotEmpty()) onTrackClick(tracks.first(), tracks)
+                    if (playlistTracks.isNotEmpty()) {
+                        onPlaylistClick(playlist)
+                        onTrackClick(playlistTracks.first(), playlistTracks)
+                    }
                 },
                 onShuffleClick = {
-                    if (tracks.isNotEmpty()) onTrackClick(tracks.shuffled().first(), tracks.shuffled())
+                    if (playlistTracks.isNotEmpty()) {
+                        onPlaylistClick(playlist)
+                        val shuffled = playlistTracks.shuffled()
+                        onTrackClick(shuffled.first(), shuffled)
+                    }
                 },
                 onRemixFlowClick = {
                     showRemixSheetForPlaylist = playlist
                 },
                 onEditTagClick = onEditTagClick,
+                onAddToPlaylistClick = { track -> trackToAddToPlaylist = track },
                 onBackClick = { activeDetailPlaylist = null }
             )
         }
@@ -378,6 +437,32 @@ fun HomeScreen(
             }
         )
     }
+
+    if (showCreatePlaylistDialog) {
+        CreatePlaylistDialog(
+            onDismiss = { showCreatePlaylistDialog = false },
+            onConfirm = { name, desc ->
+                onCreatePlaylist?.invoke(name, desc)
+                showCreatePlaylistDialog = false
+            }
+        )
+    }
+
+    trackToAddToPlaylist?.let { track ->
+        AddToPlaylistDialog(
+            track = track,
+            playlists = playlists,
+            onDismiss = { trackToAddToPlaylist = null },
+            onPlaylistSelected = { pl ->
+                onAddTrackToPlaylist?.invoke(pl.id, track.id)
+                trackToAddToPlaylist = null
+            },
+            onCreateNewPlaylist = {
+                trackToAddToPlaylist = null
+                showCreatePlaylistDialog = true
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -393,6 +478,7 @@ fun CollectionDetailView(
     onShuffleClick: () -> Unit,
     onRemixFlowClick: (() -> Unit)? = null,
     onEditTagClick: (Track) -> Unit,
+    onAddToPlaylistClick: ((Track) -> Unit)? = null,
     onBackClick: () -> Unit
 ) {
     Scaffold(
@@ -614,6 +700,16 @@ fun CollectionDetailView(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false }
                         ) {
+                            if (onAddToPlaylistClick != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Add to Playlist") },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onAddToPlaylistClick(track)
+                                    }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Edit Metadata / Tags") },
                                 onClick = {
@@ -637,7 +733,8 @@ fun CollectionDetailView(
 fun TrackListView(
     tracks: List<Track>,
     onTrackClick: (Track) -> Unit,
-    onEditTagClick: (Track) -> Unit
+    onEditTagClick: (Track) -> Unit,
+    onAddToPlaylistClick: ((Track) -> Unit)? = null
 ) {
     if (tracks.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -671,7 +768,8 @@ fun TrackListView(
             TrackListItem(
                 track = track,
                 onClick = { onTrackClick(track) },
-                onEditTagClick = { onEditTagClick(track) }
+                onEditTagClick = { onEditTagClick(track) },
+                onAddToPlaylistClick = onAddToPlaylistClick?.let { { it(track) } }
             )
         }
     }
@@ -681,7 +779,8 @@ fun TrackListView(
 fun TrackListItem(
     track: Track,
     onClick: () -> Unit,
-    onEditTagClick: () -> Unit
+    onEditTagClick: () -> Unit,
+    onAddToPlaylistClick: (() -> Unit)? = null
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -778,6 +877,16 @@ fun TrackListItem(
                 expanded = menuExpanded,
                 onDismissRequest = { menuExpanded = false }
             ) {
+                if (onAddToPlaylistClick != null) {
+                    DropdownMenuItem(
+                        text = { Text("Add to Playlist") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onAddToPlaylistClick()
+                        }
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text("Edit Metadata / Tags") },
                     onClick = {
@@ -901,41 +1010,216 @@ fun ArtistListView(
 @Composable
 fun PlaylistListView(
     playlists: List<Playlist>,
-    onPlaylistClick: (Playlist) -> Unit
+    onPlaylistClick: (Playlist) -> Unit,
+    onCreatePlaylistClick: () -> Unit,
+    onDeletePlaylistClick: ((Long) -> Unit)? = null
 ) {
+    var playlistToDelete by remember { mutableStateOf<Playlist?>(null) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 120.dp, top = 8.dp)
     ) {
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .clickable { onCreatePlaylistClick() },
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Create New Playlist",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Create New Playlist",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Save your favorite tracks to a custom playlist",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        if (playlists.isEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 40.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.MusicNote,
+                            contentDescription = null,
+                            modifier = Modifier.size(56.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        )
+                        Text(
+                            text = "No Playlists Yet",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Create one above or save an AI mix",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
         items(playlists, key = { it.id }) { playlist ->
+            var menuExpanded by remember { mutableStateOf(false) }
+            val isAiPlaylist = !playlist.smartRuleJson.isNullOrBlank() || playlist.isSmart
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { onPlaylistClick(playlist) }
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                DefaultArtwork(
-                    title = playlist.name,
-                    artist = "Playlist",
-                    cornerRadius = 10.dp,
-                    modifier = Modifier.size(52.dp)
-                )
-                Spacer(modifier = Modifier.width(16.dp))
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isAiPlaylist) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isAiPlaylist) {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = "AI Playlist",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    } else {
+                        DefaultArtwork(
+                            title = playlist.name,
+                            artist = "Playlist",
+                            cornerRadius = 12.dp,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = playlist.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (isAiPlaylist) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "AI MIX",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 9.sp
+                                ),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .background(
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                        RoundedCornerShape(4.dp)
+                                    )
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
                     Text(
-                        text = playlist.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "${playlist.songCount} tracks",
+                        text = if (playlist.description.isNotBlank()) "${playlist.songCount} tracks • ${playlist.description}" else "${playlist.songCount} tracks",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                }
+
+                Box {
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Options")
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        if (onDeletePlaylistClick != null) {
+                            DropdownMenuItem(
+                                text = { Text("Delete Playlist", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    playlistToDelete = playlist
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
+    }
+
+    playlistToDelete?.let { pl ->
+        AlertDialog(
+            onDismissRequest = { playlistToDelete = null },
+            title = { Text("Delete Playlist") },
+            text = { Text("Are you sure you want to delete '${pl.name}'? Audio files on your device will not be deleted.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeletePlaylistClick?.invoke(pl.id)
+                        playlistToDelete = null
+                    }
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { playlistToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
@@ -989,3 +1273,180 @@ fun FolderListView(
         }
     }
 }
+
+@Composable
+fun CreatePlaylistDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, description: String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Create New Playlist", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Playlist Name") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description (Optional)") },
+                    singleLine = false,
+                    maxLines = 2,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        onConfirm(name.trim(), description.trim())
+                    }
+                },
+                enabled = name.isNotBlank(),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun AddToPlaylistDialog(
+    track: Track,
+    playlists: List<Playlist>,
+    onDismiss: () -> Unit,
+    onPlaylistSelected: (Playlist) -> Unit,
+    onCreateNewPlaylist: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add to Playlist", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Select a playlist for \"${track.title}\"",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onCreateNewPlaylist() }
+                        .padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "+ Create New Playlist",
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                if (playlists.isEmpty()) {
+                    Text(
+                        text = "No playlists found yet",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 260.dp)
+                    ) {
+                        items(playlists, key = { it.id }) { pl ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onPlaylistSelected(pl) }
+                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (!pl.smartRuleJson.isNullOrBlank() || pl.isSmart) {
+                                        Icon(
+                                            Icons.Default.AutoAwesome,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Default.MusicNote,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = pl.name,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${pl.songCount} tracks",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+

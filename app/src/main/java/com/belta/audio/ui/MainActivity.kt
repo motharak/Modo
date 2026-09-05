@@ -481,6 +481,43 @@ fun MainAppContent(
                                 }
                             }
                         },
+                        onGetPlaylistTracks = { playlistId ->
+                            app.playlistRepository.getTracksForPlaylist(playlistId)
+                        },
+                        onCreatePlaylist = { name, desc ->
+                            scope.launch {
+                                try {
+                                    app.playlistRepository.createPlaylist(
+                                        name = name,
+                                        description = desc,
+                                        isSmart = false
+                                    )
+                                    Toast.makeText(context, "Created playlist: $name", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Error creating playlist: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        onDeletePlaylist = { playlistId ->
+                            scope.launch {
+                                try {
+                                    app.playlistRepository.deletePlaylist(playlistId)
+                                    Toast.makeText(context, "Deleted playlist", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Error deleting playlist: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        onAddTrackToPlaylist = { playlistId, trackId ->
+                            scope.launch {
+                                try {
+                                    app.playlistRepository.addTracksToPlaylist(playlistId, listOf(trackId))
+                                    Toast.makeText(context, "Added track to playlist", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Error adding track: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
                         onUpdatePlaylist = { updatedPlaylist ->
                             scope.launch {
                                 app.playlistRepository.updatePlaylist(updatedPlaylist)
@@ -503,12 +540,33 @@ fun MainAppContent(
                 composable("smart_playlists") {
                     SmartPlaylistScreen(
                         allTracks = tracks,
-                        userSmartPlaylists = playlists.filter { it.isSmart },
+                        userSmartPlaylists = playlists.filter { it.isSmart || !it.smartRuleJson.isNullOrBlank() },
                         onPlayTracks = { queue ->
                             if (queue.isNotEmpty()) {
                                 app.audioEngineController.playQueue(queue, 0)
                             } else {
                                 Toast.makeText(context, "No tracks matching this mix", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onPlayPlaylist = { playlist ->
+                            scope.launch {
+                                var pTracks = app.playlistRepository.getTracksForPlaylist(playlist.id)
+                                if (pTracks.isEmpty() && !playlist.smartRuleJson.isNullOrBlank()) {
+                                    try {
+                                        val def = Json.decodeFromString<com.belta.audio.core.domain.model.SmartRuleDefinition>(playlist.smartRuleJson)
+                                        pTracks = SmartPlaylistEngine.evaluate(tracks, def)
+                                    } catch (_: Exception) {}
+                                }
+                                if (pTracks.isNotEmpty()) {
+                                    app.audioEngineController.setPlaylistFlowConfig(
+                                        playlist.crossfadeSeconds,
+                                        playlist.isAutomixEnabled,
+                                        playlist.fadeCurve
+                                    )
+                                    app.audioEngineController.playQueue(pTracks, 0)
+                                } else {
+                                    Toast.makeText(context, "No tracks matching this mix", Toast.LENGTH_SHORT).show()
+                                }
                             }
                         },
                         onCreateCustomSmartPlaylist = { name, desc, ruleJson, trackIds ->
@@ -517,13 +575,13 @@ fun MainAppContent(
                                     val playlistId = app.playlistRepository.createPlaylist(
                                         name = name,
                                         description = desc,
-                                        isSmart = true,
+                                        isSmart = false,
                                         smartRuleJson = ruleJson
                                     )
                                     if (trackIds.isNotEmpty()) {
                                         app.playlistRepository.addTracksToPlaylist(playlistId, trackIds)
                                     }
-                                    Toast.makeText(context, "Saved AI playlist: $name", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Saved playlist: $name", Toast.LENGTH_SHORT).show()
                                 } catch (e: Exception) {
                                     DebugLogger.e(LogCategory.DATABASE, "SMART_PLAYLIST", "Error saving smart playlist: ${e.message}")
                                     Toast.makeText(context, "Error saving playlist: ${e.message}", Toast.LENGTH_SHORT).show()

@@ -10,6 +10,7 @@ interface PlaylistRepository {
     fun getSmartPlaylistsFlow(): Flow<List<Playlist>>
     fun getUserPlaylistsFlow(): Flow<List<Playlist>>
     fun getTracksForPlaylistFlow(playlistId: Long): Flow<List<Track>>
+    suspend fun getTracksForPlaylist(playlistId: Long): List<Track>
     suspend fun getPlaylistById(id: Long): Playlist?
     suspend fun createPlaylist(name: String, description: String = "", isSmart: Boolean = false, smartRuleJson: String? = null): Long
     suspend fun updatePlaylist(playlist: Playlist)
