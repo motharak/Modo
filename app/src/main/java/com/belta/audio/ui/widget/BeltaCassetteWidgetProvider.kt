@@ -49,7 +49,7 @@ class BeltaCassetteWidgetProvider : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_cassette_title, "SIDE A • ${track.title}")
                 views.setTextViewText(R.id.widget_cassette_artist, track.artist)
             } else {
-                views.setTextViewText(R.id.widget_cassette_title, "SIDE A • Belta Tape Deck")
+                views.setTextViewText(R.id.widget_cassette_title, "SIDE A • Modo Tape Deck")
                 views.setTextViewText(R.id.widget_cassette_artist, "Ready to Play")
             }
 

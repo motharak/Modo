@@ -12,6 +12,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -19,8 +20,17 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import com.belta.audio.R
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -62,6 +72,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -124,15 +135,78 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            var showSplashScreen by remember { mutableStateOf(true) }
+
             BeltaAudioTheme(
                 themeMode = currentTheme,
                 albumArtColorScheme = albumArtColorScheme
             ) {
-                MainAppContent(
-                    app = app,
-                    currentTheme = currentTheme,
-                    onThemeChange = { currentTheme = it }
+                Crossfade(targetState = showSplashScreen, label = "AppSplashCrossfade") { isSplash ->
+                    if (isSplash) {
+                        BeltaSplashScreen(onFinished = { showSplashScreen = false })
+                    } else {
+                        MainAppContent(
+                            app = app,
+                            currentTheme = currentTheme,
+                            onThemeChange = { currentTheme = it }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BeltaSplashScreen(
+    onFinished: () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        visible = true
+        kotlinx.coroutines.delay(1100L)
+        onFinished()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0B0E14)),
+        contentAlignment = Alignment.Center
+    ) {
+        AnimatedVisibility(
+            visible = visible,
+            enter = fadeIn(animationSpec = tween(500)) + scaleIn(initialScale = 0.88f, animationSpec = tween(500)),
+            exit = fadeOut(animationSpec = tween(350))
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.app_logo),
+                    contentDescription = "Modo Logo",
+                    modifier = Modifier
+                        .size(112.dp)
+                        .clip(RoundedCornerShape(26.dp))
                 )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "BELTA AUDIO",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 3.sp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "STUDIO SOUND ENGINE",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
             }
         }
     }
@@ -152,6 +226,7 @@ fun MainAppContent(
     var isDebugEnabled by remember { mutableStateOf(sharedPreferences.getBoolean("live_debug_enabled", true)) }
     var minAudioDurationSeconds by remember { mutableIntStateOf(sharedPreferences.getInt("min_audio_duration_seconds", 60)) }
     var isAnimationsEnabled by remember { mutableStateOf(sharedPreferences.getBoolean("animations_enabled", true)) }
+    var isAutoPlayRadioEnabled by remember { mutableStateOf(sharedPreferences.getBoolean("auto_play_radio_enabled", true)) }
     var isScanning by remember { mutableStateOf(false) }
 
     val tracks by app.audioRepository.getAllTracksFlow().collectAsState(initial = emptyList())
@@ -188,6 +263,11 @@ fun MainAppContent(
             app.audioEngineController.setReplayGainEnabled(replayGainSaved)
             BeltaMediaService.equalizerEngineInstance?.setReplayGainEnabled(replayGainSaved)
         }
+    }
+
+    LaunchedEffect(tracks, isAutoPlayRadioEnabled) {
+        app.audioEngineController.autoPlayCandidatesProvider = { tracks }
+        app.audioEngineController.isAutoPlayRadioEnabled = isAutoPlayRadioEnabled
     }
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -382,6 +462,11 @@ fun MainAppContent(
                             }
                         },
                         onPlaylistClick = { playlist ->
+                            app.audioEngineController.setPlaylistFlowConfig(
+                                playlist.crossfadeSeconds,
+                                playlist.isAutomixEnabled,
+                                playlist.fadeCurve
+                            )
                             scope.launch {
                                 if (playlist.isSmart && playlist.smartRuleJson != null) {
                                     try {
@@ -394,6 +479,17 @@ fun MainAppContent(
                                 }
                             }
                         },
+                        onUpdatePlaylist = { updatedPlaylist ->
+                            scope.launch {
+                                app.playlistRepository.updatePlaylist(updatedPlaylist)
+                                app.audioEngineController.setPlaylistFlowConfig(
+                                    updatedPlaylist.crossfadeSeconds,
+                                    updatedPlaylist.isAutomixEnabled,
+                                    updatedPlaylist.fadeCurve
+                                )
+                            }
+                        },
+                        globalCrossfadeSeconds = playbackState.crossfadeDurationSeconds,
                         onEditTagClick = { track ->
                             editingTrack = track
                             navController.navigate("tag_editor")
@@ -527,6 +623,13 @@ fun MainAppContent(
                             sharedPreferences.edit().putBoolean("animations_enabled", enabled).apply()
                             Toast.makeText(context, if (enabled) "Motion & fluid animations enabled" else "Animations disabled", Toast.LENGTH_SHORT).show()
                         },
+                        isAutoPlayRadioEnabled = isAutoPlayRadioEnabled,
+                        onAutoPlayRadioToggle = { enabled ->
+                            isAutoPlayRadioEnabled = enabled
+                            sharedPreferences.edit().putBoolean("auto_play_radio_enabled", enabled).apply()
+                            app.audioEngineController.isAutoPlayRadioEnabled = enabled
+                            Toast.makeText(context, if (enabled) "Auto-Play infinite radio enabled" else "Auto-Play disabled", Toast.LENGTH_SHORT).show()
+                        },
                         onBackupToCloud = {
                             scope.launch {
                                 val backupFile = app.syncManager.exportBackupToFile()
@@ -607,23 +710,12 @@ fun MainAppContent(
                             strokeWidth = 2.5.dp,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        Column {
-                            Text(
-                                text = "Scanning Library: ${scanProgress.scannedCount} tracks",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            if (scanProgress.currentTitle.isNotBlank()) {
-                                Text(
-                                    text = scanProgress.currentTitle,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                            }
-                        }
+                        Text(
+                            text = "Scanning Library: ${scanProgress.scannedCount} tracks",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }
@@ -651,6 +743,7 @@ fun MainAppContent(
                     playbackState = playbackState,
                     onPlayPauseClick = { app.audioEngineController.togglePlayPause() },
                     onNextClick = { app.audioEngineController.skipToNext() },
+                    onPreviousClick = { app.audioEngineController.skipToPrevious() },
                     onClick = { isNowPlayingExpanded = true }
                 )
             }

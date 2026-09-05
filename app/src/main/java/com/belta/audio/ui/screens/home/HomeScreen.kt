@@ -77,14 +77,19 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.belta.audio.core.domain.model.Album
 import com.belta.audio.core.domain.model.Artist
 import com.belta.audio.core.domain.model.Folder
 import com.belta.audio.core.domain.model.Playlist
 import com.belta.audio.core.domain.model.Track
 import com.belta.audio.ui.components.DefaultArtwork
+import com.belta.audio.ui.components.PlaylistRemixFlowSheet
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material3.ButtonDefaults
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,6 +104,8 @@ fun HomeScreen(
     onArtistClick: (Artist) -> Unit = {},
     onFolderClick: (Folder) -> Unit = {},
     onPlaylistClick: (Playlist) -> Unit = {},
+    onUpdatePlaylist: ((Playlist) -> Unit)? = null,
+    globalCrossfadeSeconds: Int = 3,
     onEditTagClick: (Track) -> Unit,
     isAnimationsEnabled: Boolean = true,
     modifier: Modifier = Modifier
@@ -111,6 +118,7 @@ fun HomeScreen(
     var activeDetailArtist by remember { mutableStateOf<Artist?>(null) }
     var activeDetailFolder by remember { mutableStateOf<Folder?>(null) }
     var activeDetailPlaylist by remember { mutableStateOf<Playlist?>(null) }
+    var showRemixSheetForPlaylist by remember { mutableStateOf<Playlist?>(null) }
 
     val isDetailOpen = activeDetailAlbum != null || activeDetailArtist != null || activeDetailFolder != null || activeDetailPlaylist != null
 
@@ -327,10 +335,13 @@ fun HomeScreen(
         }
 
         activeDetailPlaylist?.let { playlist ->
+            val flowLabel = if ((playlist.crossfadeSeconds ?: globalCrossfadeSeconds) > 0) {
+                "${playlist.crossfadeSeconds ?: globalCrossfadeSeconds}s flow"
+            } else "gapless"
             CollectionDetailView(
                 title = playlist.name,
                 subtitle = playlist.description.ifEmpty { "Custom Playlist" },
-                badge = "${playlist.songCount} tracks",
+                badge = "${playlist.songCount} tracks • $flowLabel",
                 artworkUri = null,
                 tracks = tracks,
                 onTrackClick = { track -> onTrackClick(track, tracks) },
@@ -340,11 +351,32 @@ fun HomeScreen(
                 onShuffleClick = {
                     if (tracks.isNotEmpty()) onTrackClick(tracks.shuffled().first(), tracks.shuffled())
                 },
+                onRemixFlowClick = {
+                    showRemixSheetForPlaylist = playlist
+                },
                 onEditTagClick = onEditTagClick,
                 onBackClick = { activeDetailPlaylist = null }
             )
         }
     }
+    }
+
+    showRemixSheetForPlaylist?.let { pl ->
+        PlaylistRemixFlowSheet(
+            playlist = pl,
+            globalCrossfadeSeconds = globalCrossfadeSeconds,
+            onDismiss = { showRemixSheetForPlaylist = null },
+            onSaveFlowConfig = { crossfadeSec, automix, curve ->
+                val updated = pl.copy(
+                    crossfadeSeconds = crossfadeSec,
+                    isAutomixEnabled = automix,
+                    fadeCurve = curve
+                )
+                onUpdatePlaylist?.invoke(updated)
+                activeDetailPlaylist = updated
+                showRemixSheetForPlaylist = null
+            }
+        )
     }
 }
 
@@ -359,6 +391,7 @@ fun CollectionDetailView(
     onTrackClick: (Track) -> Unit,
     onPlayAllClick: () -> Unit,
     onShuffleClick: () -> Unit,
+    onRemixFlowClick: (() -> Unit)? = null,
     onEditTagClick: (Track) -> Unit,
     onBackClick: () -> Unit
 ) {
@@ -462,7 +495,7 @@ fun CollectionDetailView(
                         }
                     }
 
-                    // Action buttons: Play All & Shuffle
+                    // Action buttons: Play All, Shuffle & Remix Flow
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -486,6 +519,18 @@ fun CollectionDetailView(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Shuffle")
                         }
+
+                        if (onRemixFlowClick != null) {
+                            OutlinedButton(
+                                onClick = onRemixFlowClick,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF818CF8)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.5f))
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Remix Flow")
+                            }
+                        }
                     }
                 }
             }
@@ -500,7 +545,11 @@ fun CollectionDetailView(
                 )
             }
 
-            itemsIndexed(tracks, key = { index, track -> "${track.id}_$index" }) { index, track ->
+            itemsIndexed(
+                items = tracks,
+                key = { index, track -> "${track.id}_$index" },
+                contentType = { _, _ -> "track" }
+            ) { index, track ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -614,7 +663,11 @@ fun TrackListView(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 120.dp, top = 8.dp)
     ) {
-        items(tracks, key = { it.id }) { track ->
+        items(
+            items = tracks,
+            key = { it.id },
+            contentType = { "track" }
+        ) { track ->
             TrackListItem(
                 track = track,
                 onClick = { onTrackClick(track) },
@@ -645,19 +698,26 @@ fun TrackListItem(
                 .clip(RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center
         ) {
-            if (track.artworkUri != null) {
+            DefaultArtwork(
+                title = track.title,
+                artist = track.artist,
+                cornerRadius = 10.dp,
+                modifier = Modifier.fillMaxSize()
+            )
+            if (!track.artworkUri.isNullOrBlank()) {
+                val context = LocalContext.current
+                val imageRequest = remember(track.artworkUri) {
+                    ImageRequest.Builder(context)
+                        .data(track.artworkUri)
+                        .size(150, 150)
+                        .crossfade(true)
+                        .build()
+                }
                 AsyncImage(
-                    model = track.artworkUri,
+                    model = imageRequest,
                     contentDescription = track.album,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
-                )
-            } else {
-                DefaultArtwork(
-                    title = track.title,
-                    artist = track.artist,
-                    cornerRadius = 10.dp,
-                    modifier = Modifier.fillMaxSize()
                 )
             }
         }

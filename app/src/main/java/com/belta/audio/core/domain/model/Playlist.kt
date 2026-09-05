@@ -12,5 +12,8 @@ data class Playlist(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val songCount: Int = 0,
-    val coverArtworkUri: String? = null
+    val coverArtworkUri: String? = null,
+    val crossfadeSeconds: Int? = null,
+    val isAutomixEnabled: Boolean = true,
+    val fadeCurve: String = "EQUAL_POWER"
 )

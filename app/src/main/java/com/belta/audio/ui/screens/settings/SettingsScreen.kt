@@ -74,6 +74,8 @@ fun SettingsScreen(
     onMinAudioDurationChange: (Int) -> Unit = {},
     isAnimationsEnabled: Boolean = true,
     onAnimationsToggle: (Boolean) -> Unit = {},
+    isAutoPlayRadioEnabled: Boolean = true,
+    onAutoPlayRadioToggle: (Boolean) -> Unit = {},
     onBackupToCloud: () -> Unit,
     onRestoreFromCloud: () -> Unit,
     isDebugEnabled: Boolean = true,
@@ -297,11 +299,21 @@ fun SettingsScreen(
                     }
 
                     // Crossfade Duration
-                    Column {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Crossfade Duration", style = MaterialTheme.typography.bodyMedium)
-                            Text(if (crossfadeSeconds > 0) "${crossfadeSeconds}s" else "Disabled", style = MaterialTheme.typography.labelSmall)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Crossfade Duration", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = if (crossfadeSeconds > 0) "${crossfadeSeconds}s Overlap" else "Disabled (Gapless)",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (crossfadeSeconds > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
+                        Text(
+                            text = "Spotify-style equal-power overlapping crossfade between tracks",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Slider(
                             value = crossfadeSeconds.toFloat(),
                             onValueChange = { onCrossfadeChange(it.toInt()) },
@@ -335,6 +347,19 @@ fun SettingsScreen(
                             Text("Equalize perceived loudness across different tracks", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Switch(checked = isReplayGainEnabled, onCheckedChange = onReplayGainToggle)
+                    }
+
+                    // Auto-Play Infinite Radio
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Auto-Play Infinite Music", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            Text("When an album finishes with no next song, play a random track from your library", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = isAutoPlayRadioEnabled, onCheckedChange = onAutoPlayRadioToggle)
                     }
                 }
             }

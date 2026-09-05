@@ -20,7 +20,10 @@ data class PlaylistEntity(
     val smartRuleJson: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
-    val coverArtworkUri: String? = null
+    val coverArtworkUri: String? = null,
+    val crossfadeSeconds: Int? = null,
+    val isAutomixEnabled: Boolean = true,
+    val fadeCurve: String = "EQUAL_POWER"
 ) {
     fun toDomain(songCount: Int = 0): Playlist = Playlist(
         id = id,
@@ -31,7 +34,10 @@ data class PlaylistEntity(
         createdAt = createdAt,
         updatedAt = updatedAt,
         songCount = songCount,
-        coverArtworkUri = coverArtworkUri
+        coverArtworkUri = coverArtworkUri,
+        crossfadeSeconds = crossfadeSeconds,
+        isAutomixEnabled = isAutomixEnabled,
+        fadeCurve = fadeCurve
     )
 
     companion object {
@@ -43,7 +49,10 @@ data class PlaylistEntity(
             smartRuleJson = playlist.smartRuleJson,
             createdAt = playlist.createdAt,
             updatedAt = playlist.updatedAt,
-            coverArtworkUri = playlist.coverArtworkUri
+            coverArtworkUri = playlist.coverArtworkUri,
+            crossfadeSeconds = playlist.crossfadeSeconds,
+            isAutomixEnabled = playlist.isAutomixEnabled,
+            fadeCurve = playlist.fadeCurve
         )
     }
 }

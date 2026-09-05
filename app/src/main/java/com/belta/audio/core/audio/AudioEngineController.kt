@@ -2,12 +2,14 @@ package com.belta.audio.core.audio
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
 import com.belta.audio.core.data.scanner.AudioTagReader
 import com.belta.audio.core.domain.model.AudioSpecs
@@ -27,6 +29,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(UnstableApi::class)
 class AudioEngineController(
@@ -61,6 +64,37 @@ class AudioEngineController(
 
     private fun setupControllerListeners() {
         val controller = mediaController ?: return
+
+        // Eagerly synchronize currently playing track on controller connect
+        val initialItem = controller.currentMediaItem
+        if (initialItem != null) {
+            val mediaId = initialItem.mediaId.toLongOrNull()
+            var initialTrack = currentQueue.find { it.id == mediaId }
+            if (initialTrack == null) {
+                val meta = initialItem.mediaMetadata
+                initialTrack = Track(
+                    id = mediaId ?: 0L,
+                    title = meta.title?.toString() ?: "Unknown Title",
+                    artist = meta.artist?.toString() ?: "Unknown Artist",
+                    album = meta.albumTitle?.toString() ?: "Unknown Album",
+                    durationMs = controller.duration.coerceAtLeast(0L),
+                    path = initialItem.requestMetadata.mediaUri?.path ?: "",
+                    artworkUri = meta.artworkUri?.toString()
+                )
+                currentQueue = currentQueue + initialTrack
+            }
+            _playbackState.update {
+                it.copy(
+                    isPlaying = controller.isPlaying,
+                    currentTrack = initialTrack,
+                    queue = currentQueue,
+                    currentQueueIndex = currentQueue.indexOf(initialTrack),
+                    durationMs = controller.duration.coerceAtLeast(0L),
+                    currentPositionMs = controller.currentPosition.coerceAtLeast(0L)
+                )
+            }
+        }
+
         controller.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _playbackState.update { it.copy(isPlaying = isPlaying) }
@@ -75,16 +109,53 @@ class AudioEngineController(
                             currentPositionMs = controller.currentPosition.coerceAtLeast(0L)
                         )
                     }
+                } else if (state == Player.STATE_ENDED) {
+                    handlePlaybackEnded()
                 }
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 val mediaId = mediaItem?.mediaId?.toLongOrNull()
-                val currentTrack = currentQueue.find { it.id == mediaId }
+                var currentTrack = currentQueue.find { it.id == mediaId }
+
+                if (currentTrack == null && mediaItem != null) {
+                    // Reconstruct immediately from metadata so UI doesn't lose currentTrack
+                    val candidate = autoPlayCandidatesProvider?.invoke()?.find { it.id == mediaId }
+                    if (candidate != null) {
+                        currentTrack = candidate
+                        currentQueue = currentQueue + candidate
+                    } else {
+                        val meta = mediaItem.mediaMetadata
+                        val fallbackTrack = Track(
+                            id = mediaId ?: 0L,
+                            title = meta.title?.toString() ?: "Unknown Title",
+                            artist = meta.artist?.toString() ?: "Unknown Artist",
+                            album = meta.albumTitle?.toString() ?: "Unknown Album",
+                            durationMs = controller.duration.coerceAtLeast(0L),
+                            path = mediaItem.requestMetadata.mediaUri?.path ?: "",
+                            artworkUri = meta.artworkUri?.toString()
+                        )
+                        currentTrack = fallbackTrack
+                        currentQueue = currentQueue + fallbackTrack
+
+                        // Fetch complete DB entity asynchronously
+                        scope.launch(Dispatchers.IO) {
+                            val dbTrack = com.belta.audio.core.data.database.BeltaDatabase.getInstance(context)
+                                .trackDao().getTrackById(mediaId ?: -1L)?.toDomain()
+                            if (dbTrack != null) {
+                                withContext(Dispatchers.Main) {
+                                    currentQueue = currentQueue.map { if (it.id == dbTrack.id) dbTrack else it }
+                                    _playbackState.update { it.copy(currentTrack = dbTrack, queue = currentQueue) }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 val queueIndex = if (currentTrack != null) currentQueue.indexOf(currentTrack) else -1
 
                 var specs = AudioSpecs()
-                if (currentTrack != null) {
+                if (currentTrack != null && currentTrack.path.isNotBlank()) {
                     specs = AudioTagReader.extractSpecs(currentTrack.path, currentTrack.mimeType)
                     com.belta.audio.core.debug.DebugLogger.i(
                         com.belta.audio.core.debug.LogCategory.AUDIO_ENGINE,
@@ -97,6 +168,7 @@ class AudioEngineController(
                 _playbackState.update {
                     it.copy(
                         currentTrack = currentTrack,
+                        queue = currentQueue,
                         currentQueueIndex = queueIndex,
                         currentSpecs = specs,
                         durationMs = controller.duration.coerceAtLeast(0L),
@@ -182,8 +254,57 @@ class AudioEngineController(
         _playbackState.update { it.copy(currentPositionMs = positionMs) }
     }
 
+    var isAutoPlayRadioEnabled: Boolean = true
+    var autoPlayCandidatesProvider: (() -> List<Track>)? = null
+
+    private fun handlePlaybackEnded() {
+        if (isAutoPlayRadioEnabled && _playbackState.value.repeatMode == RepeatMode.OFF) {
+            playNextAutoPlayTrack()
+        }
+    }
+
+    fun playNextAutoPlayTrack() {
+        val controller = mediaController ?: return
+        val current = _playbackState.value.currentTrack
+        val allCandidates = autoPlayCandidatesProvider?.invoke() ?: emptyList()
+        val candidates = allCandidates.filter { it.id != current?.id }
+        if (candidates.isEmpty()) return
+
+        // Prioritize same genre or artist if available, else random from library
+        val similar = if (current != null && !current.genre.isNullOrBlank()) {
+            candidates.filter { it.genre.equals(current.genre, ignoreCase = true) || it.artistId == current.artistId }
+        } else emptyList()
+
+        val nextTrack = if (similar.isNotEmpty()) similar.random() else candidates.random()
+        val mediaItem = BeltaMediaService.trackToMediaItem(nextTrack)
+
+        currentQueue = currentQueue + nextTrack
+        controller.addMediaItem(mediaItem)
+        controller.seekToDefaultPosition(controller.mediaItemCount - 1)
+        controller.prepare()
+        controller.play()
+
+        _playbackState.update {
+            it.copy(
+                queue = currentQueue,
+                currentTrack = nextTrack,
+                currentQueueIndex = currentQueue.size - 1
+            )
+        }
+        com.belta.audio.core.debug.DebugLogger.i(
+            com.belta.audio.core.debug.LogCategory.AUDIO_ENGINE,
+            "AUTO_PLAY",
+            "Album queue completed. Auto-playing random track: ${nextTrack.title} by ${nextTrack.artist}"
+        )
+    }
+
     fun skipToNext() {
-        mediaController?.seekToNextMediaItem()
+        val controller = mediaController ?: return
+        if (controller.hasNextMediaItem()) {
+            controller.seekToNextMediaItem()
+        } else if (isAutoPlayRadioEnabled) {
+            playNextAutoPlayTrack()
+        }
     }
 
     fun skipToPrevious() {
@@ -228,6 +349,22 @@ class AudioEngineController(
 
     fun setCrossfadeDuration(seconds: Int) {
         _playbackState.update { it.copy(crossfadeDurationSeconds = seconds) }
+        sendCrossfadeConfig(seconds, isAutomix = true, curve = "EQUAL_POWER")
+    }
+
+    fun setPlaylistFlowConfig(crossfadeSeconds: Int?, isAutomixEnabled: Boolean, fadeCurve: String) {
+        val duration = crossfadeSeconds ?: _playbackState.value.crossfadeDurationSeconds
+        sendCrossfadeConfig(duration, isAutomixEnabled, fadeCurve)
+    }
+
+    private fun sendCrossfadeConfig(duration: Int, isAutomix: Boolean, curve: String) {
+        val bundle = Bundle().apply {
+            putInt("crossfade_duration", duration)
+            putBoolean("automix_enabled", isAutomix)
+            putString("fade_curve", curve)
+        }
+        val command = SessionCommand(BeltaMediaService.CUSTOM_COMMAND_SET_CROSSFADE, Bundle.EMPTY)
+        mediaController?.sendCustomCommand(command, bundle)
     }
 
     fun setReplayGainEnabled(enabled: Boolean) {

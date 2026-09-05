@@ -39,6 +39,7 @@
             android:exported="true"
             android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
             android:theme="@style/Theme.BeltaAudio">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

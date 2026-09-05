@@ -5,7 +5,8 @@ enum class PlayerVisualTheme(val displayName: String, val subtitle: String) {
     RETRO_CASSETTE("Retro Cassette", "Vintage tape deck with spinning spools & VU meters"),
     CYBER_HUD("Future Cyber HUD", "Holographic telemetry, spectrum ring & neon meters"),
     VINYL_TURNTABLE("Vinyl Record", "Authentic vinyl microgrooves & tonearm tracking"),
-    MINIMALIST_ZEN("Minimalist Zen", "Distraction-free typography & subtle gradient")
+    MINIMALIST_ZEN("Minimalist Zen", "Distraction-free typography & subtle gradient"),
+    CLASSIC_CLICK_WHEEL("Classic Click Wheel", "Rotary scroll wheel with jog scrubbing & center select")
 }
 
 enum class ProgressBarStyle(val displayName: String) {

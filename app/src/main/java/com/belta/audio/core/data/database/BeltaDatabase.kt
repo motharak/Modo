@@ -30,7 +30,7 @@ import kotlinx.coroutines.launch
         EqualizerPresetEntity::class,
         ScanFolderEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class BeltaDatabase : RoomDatabase() {

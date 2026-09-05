@@ -2,8 +2,8 @@ package com.belta.audio.ui.components.progressbar
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,10 +20,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +35,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -51,9 +54,24 @@ fun CustomMusicProgressBar(
     val totalMs = durationMs.coerceAtLeast(1L)
     var isDragging by remember { mutableStateOf(false) }
     var dragProgress by remember { mutableFloatStateOf(0f) }
+    var userSeekFraction by remember { mutableStateOf<Float?>(null) }
+    val onSeekState by rememberUpdatedState(onSeek)
 
     val actualProgress = (currentPositionMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
-    val displayProgress = if (isDragging) dragProgress else actualProgress
+
+    // Clear userSeekFraction once actualProgress catches up close to seek position
+    LaunchedEffect(actualProgress) {
+        val target = userSeekFraction
+        if (target != null && kotlin.math.abs(actualProgress - target) < 0.03f) {
+            userSeekFraction = null
+        }
+    }
+
+    val displayProgress = when {
+        isDragging -> dragProgress
+        userSeekFraction != null -> userSeekFraction!!
+        else -> actualProgress
+    }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Box(
@@ -61,29 +79,36 @@ fun CustomMusicProgressBar(
                 .fillMaxWidth()
                 .height(38.dp)
                 .pointerInput(totalMs) {
-                    detectTapGestures { offset ->
-                        val newProgress = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                        onSeek((newProgress * totalMs).toLong())
-                    }
-                }
-                .pointerInput(totalMs) {
-                    detectHorizontalDragGestures(
-                        onDragStart = { offset ->
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val width = size.width.toFloat()
+                        var currentP = 0f
+                        if (width > 0f) {
+                            currentP = (down.position.x / width).coerceIn(0f, 1f)
+                            dragProgress = currentP
+                            userSeekFraction = currentP
                             isDragging = true
-                            dragProgress = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                        },
-                        onDragEnd = {
-                            isDragging = false
-                            onSeek((dragProgress * totalMs).toLong())
-                        },
-                        onDragCancel = {
-                            isDragging = false
-                        },
-                        onHorizontalDrag = { change, _ ->
-                            change.consume()
-                            dragProgress = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
                         }
-                    )
+                        var moved = false
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (change.changedToUp()) {
+                                change.consume()
+                                break
+                            }
+                            change.consume()
+                            moved = true
+                            if (width > 0f) {
+                                currentP = (change.position.x / width).coerceIn(0f, 1f)
+                                dragProgress = currentP
+                                userSeekFraction = currentP
+                            }
+                        }
+                        isDragging = false
+                        // Seek only once on release or tap to eliminate ExoPlayer playback stutter and position jitter
+                        onSeekState((currentP * totalMs).toLong())
+                    }
                 },
             contentAlignment = Alignment.Center
         ) {
@@ -102,6 +127,37 @@ fun CustomMusicProgressBar(
                 }
                 ProgressBarStyle.SEGMENTED_TICKS -> {
                     SegmentedTicksProgressBar(progress = displayProgress)
+                }
+            }
+
+            // Only draw thumb indicator for styles that don't already have their own integrated thumb
+            if (style == ProgressBarStyle.DYNAMIC_WAVEFORM || style == ProgressBarStyle.LIQUID_CAPSULE) {
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(38.dp)
+                ) {
+                    val x = (size.width * displayProgress).coerceIn(6.dp.toPx(), size.width - 6.dp.toPx())
+                    val y = size.height / 2f
+
+                    // Drop shadow
+                    drawCircle(
+                        color = Color.Black.copy(alpha = 0.35f),
+                        radius = 8.dp.toPx(),
+                        center = Offset(x, y + 1.dp.toPx())
+                    )
+                    // Outer ring
+                    drawCircle(
+                        color = Color.White,
+                        radius = 6.dp.toPx(),
+                        center = Offset(x, y)
+                    )
+                    // Inner core accent
+                    drawCircle(
+                        color = Color(0xFF6750A4),
+                        radius = 3.dp.toPx(),
+                        center = Offset(x, y)
+                    )
                 }
             }
         }

@@ -51,7 +51,7 @@ class BeltaGlassWidgetProvider : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_track_title, track.title)
                 views.setTextViewText(R.id.widget_track_artist, track.artist)
             } else {
-                views.setTextViewText(R.id.widget_track_title, "Belta Audio")
+                views.setTextViewText(R.id.widget_track_title, "Modo")
                 views.setTextViewText(R.id.widget_track_artist, "Ready to Play")
             }
 

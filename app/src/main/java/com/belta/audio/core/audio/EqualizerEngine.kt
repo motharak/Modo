@@ -1,6 +1,7 @@
 package com.belta.audio.core.audio
 
 import android.media.audiofx.BassBoost
+import android.media.audiofx.EnvironmentalReverb
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.PresetReverb
@@ -22,6 +23,7 @@ class EqualizerEngine {
     private var virtualizer: Virtualizer? = null
     private var loudnessEnhancer: LoudnessEnhancer? = null
     private var presetReverb: PresetReverb? = null
+    private var environmentalReverb: EnvironmentalReverb? = null
 
     var isInitialized = false
         private set
@@ -110,19 +112,36 @@ class EqualizerEngine {
             DebugLogger.e(LogCategory.DSP_EQUALIZER, "LOUDNESS", "Failed to init LoudnessEnhancer: ${e.message}")
         }
 
-        // 5. Preset Reverb (Session 0 Output Mix auxiliary effect)
+        // 5. Environmental Reverb (Direct audioSessionId insert effect for tangible acoustic stage change)
         try {
-            presetReverb = PresetReverb(0, 0).apply {
-                preset = currentReverbStage.presetId
-                val active = isEnabled && currentReverbStage != ReverbSoundStage.NONE
-                enabled = active
-                if (active) {
-                    onAuxReverbChanged?.invoke(id, 1.0f)
+            environmentalReverb = EnvironmentalReverb(0, audioSessionId).apply {
+                enabled = isEnabled && currentReverbStage != ReverbSoundStage.NONE
+            }
+            applyEnvironmentalReverbSettings(currentReverbStage)
+            DebugLogger.i(LogCategory.DSP_EQUALIZER, "REVERB", "EnvironmentalReverb direct session active on audioSessionId=$audioSessionId")
+        } catch (e: Exception) {
+            DebugLogger.w(LogCategory.DSP_EQUALIZER, "REVERB", "EnvironmentalReverb direct insert failed, trying PresetReverb: ${e.message}")
+            try {
+                // Direct session insert fallback
+                presetReverb = PresetReverb(0, audioSessionId).apply {
+                    preset = currentReverbStage.presetId
+                    enabled = isEnabled && currentReverbStage != ReverbSoundStage.NONE
+                }
+                DebugLogger.i(LogCategory.DSP_EQUALIZER, "REVERB", "PresetReverb active on session $audioSessionId")
+            } catch (e2: Exception) {
+                // Secondary fallback: session 0 aux
+                try {
+                    presetReverb = PresetReverb(0, 0).apply {
+                        preset = currentReverbStage.presetId
+                        val active = isEnabled && currentReverbStage != ReverbSoundStage.NONE
+                        enabled = active
+                        if (active) onAuxReverbChanged?.invoke(id, 1.0f)
+                    }
+                    DebugLogger.i(LogCategory.DSP_EQUALIZER, "REVERB", "PresetReverb active on session 0 aux")
+                } catch (e3: Exception) {
+                    DebugLogger.e(LogCategory.DSP_EQUALIZER, "REVERB", "All reverb initialization failed: ${e3.message}")
                 }
             }
-            DebugLogger.i(LogCategory.DSP_EQUALIZER, "REVERB", "PresetReverb active on session 0")
-        } catch (e: Exception) {
-            DebugLogger.e(LogCategory.DSP_EQUALIZER, "REVERB", "Failed to init PresetReverb on session 0: ${e.message}")
         }
 
         isInitialized = true
@@ -307,8 +326,93 @@ class EqualizerEngine {
         currentReverbStage = stage
         currentPreset = currentPreset.copy(reverbStage = stage)
         _presetState.value = currentPreset
-        try {
-            presetReverb?.let {
+        applyEnvironmentalReverbSettings(stage)
+    }
+
+    private fun applyEnvironmentalReverbSettings(stage: ReverbSoundStage) {
+        val env = environmentalReverb
+        if (env != null) {
+            try {
+                if (stage == ReverbSoundStage.NONE) {
+                    env.enabled = false
+                    return
+                }
+
+                env.enabled = isEnabled
+                when (stage) {
+                    ReverbSoundStage.CONCERT_HALL -> {
+                        env.roomLevel = 0.toShort()
+                        env.roomHFLevel = (-600).toShort()
+                        env.decayTime = 3900 // 3.9 seconds vast cathedral/concert hall decay
+                        env.decayHFRatio = 700.toShort()
+                        env.reflectionsLevel = (-1000).toShort()
+                        env.reflectionsDelay = 20
+                        env.reverbLevel = 200.toShort()
+                        env.reverbDelay = 30
+                        env.diffusion = 1000.toShort()
+                        env.density = 1000.toShort()
+                    }
+                    ReverbSoundStage.LARGE_AUDITORIUM -> {
+                        env.roomLevel = (-500).toShort()
+                        env.roomHFLevel = (-800).toShort()
+                        env.decayTime = 4500 // 4.5 seconds wide amphitheater
+                        env.decayHFRatio = 600.toShort()
+                        env.reflectionsLevel = (-800).toShort()
+                        env.reflectionsDelay = 30
+                        env.reverbLevel = 300.toShort()
+                        env.reverbDelay = 40
+                        env.diffusion = 900.toShort()
+                        env.density = 900.toShort()
+                    }
+                    ReverbSoundStage.ACOUSTIC_CHAMBER -> {
+                        env.roomLevel = (-600).toShort()
+                        env.roomHFLevel = (-500).toShort()
+                        env.decayTime = 2400 // 2.4 seconds warm chamber
+                        env.decayHFRatio = 800.toShort()
+                        env.reflectionsLevel = (-1100).toShort()
+                        env.reflectionsDelay = 15
+                        env.reverbLevel = 0.toShort()
+                        env.reverbDelay = 25
+                        env.diffusion = 800.toShort()
+                        env.density = 850.toShort()
+                    }
+                    ReverbSoundStage.STUDIO_ROOM -> {
+                        env.roomLevel = (-800).toShort()
+                        env.roomHFLevel = (-400).toShort()
+                        env.decayTime = 1100 // 1.1 seconds tight studio
+                        env.decayHFRatio = 850.toShort()
+                        env.reflectionsLevel = (-1300).toShort()
+                        env.reflectionsDelay = 10
+                        env.reverbLevel = (-200).toShort()
+                        env.reverbDelay = 15
+                        env.diffusion = 700.toShort()
+                        env.density = 800.toShort()
+                    }
+                    ReverbSoundStage.VINTAGE_PLATE -> {
+                        env.roomLevel = (-400).toShort()
+                        env.roomHFLevel = 0.toShort() // Bright highs for analog plate
+                        env.decayTime = 1600 // 1.6 seconds shimmer plate
+                        env.decayHFRatio = 950.toShort()
+                        env.reflectionsLevel = 0.toShort()
+                        env.reflectionsDelay = 5
+                        env.reverbLevel = 450.toShort()
+                        env.reverbDelay = 10
+                        env.diffusion = 1000.toShort()
+                        env.density = 1000.toShort()
+                    }
+                    else -> {
+                        env.enabled = false
+                    }
+                }
+                DebugLogger.i(LogCategory.DSP_EQUALIZER, "REVERB", "Applied environmental reverb stage: ${stage.name} (decay=${env.decayTime}ms)")
+            } catch (e: Exception) {
+                DebugLogger.e(LogCategory.DSP_EQUALIZER, "REVERB", "Error setting environmental reverb stage: ${e.message}")
+            }
+        }
+
+        // Fallback for presetReverb if active
+        presetReverb?.let {
+            try {
                 if (stage == ReverbSoundStage.NONE) {
                     it.enabled = false
                     onAuxReverbChanged?.invoke(null, 0f)
@@ -321,10 +425,9 @@ class EqualizerEngine {
                         onAuxReverbChanged?.invoke(null, 0f)
                     }
                 }
-                Unit
+            } catch (e: Exception) {
+                DebugLogger.e(LogCategory.DSP_EQUALIZER, "REVERB", "Error setting preset reverb fallback: ${e.message}")
             }
-        } catch (e: Exception) {
-            DebugLogger.e(LogCategory.DSP_EQUALIZER, "REVERB", "Error setting reverb stage: ${e.message}")
         }
     }
 
@@ -349,6 +452,9 @@ class EqualizerEngine {
             equalizer?.enabled = enabled
             bassBoost?.enabled = enabled && (currentPreset.bassBoost > 0)
             virtualizer?.enabled = enabled && (currentPreset.virtualizer > 0)
+            environmentalReverb?.let {
+                it.enabled = enabled && currentReverbStage != ReverbSoundStage.NONE
+            }
             presetReverb?.let {
                 val reverbActive = enabled && currentReverbStage != ReverbSoundStage.NONE
                 it.enabled = reverbActive
@@ -377,6 +483,9 @@ class EqualizerEngine {
             virtualizer?.release()
         } catch (e: Exception) { /* ignore */ }
         try {
+            environmentalReverb?.release()
+        } catch (e: Exception) { /* ignore */ }
+        try {
             presetReverb?.release()
         } catch (e: Exception) { /* ignore */ }
         try {
@@ -386,6 +495,7 @@ class EqualizerEngine {
         equalizer = null
         bassBoost = null
         virtualizer = null
+        environmentalReverb = null
         presetReverb = null
         loudnessEnhancer = null
         isInitialized = false

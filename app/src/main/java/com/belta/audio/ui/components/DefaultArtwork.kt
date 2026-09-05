@@ -1,14 +1,12 @@
 package com.belta.audio.ui.components
 
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -17,75 +15,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.belta.audio.R
 import kotlin.math.absoluteValue
-
-@Composable
-fun DefaultArtwork(
-    title: String,
-    artist: String,
-    modifier: Modifier = Modifier,
-    cornerRadius: Dp = 12.dp
-) {
-    val paletteIndex = remember(title, artist) {
-        (title.hashCode() + artist.hashCode()).absoluteValue % GradientPalettes.size
-    }
-    val gradientColors = GradientPalettes[paletteIndex]
-
-    BoxWithConstraints(
-        modifier = modifier
-            .clip(RoundedCornerShape(cornerRadius))
-            .background(
-                Brush.linearGradient(
-                    colors = gradientColors,
-                    start = Offset(0f, 0f),
-                    end = Offset(300f, 300f)
-                )
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        val minDim = if (maxWidth < maxHeight) maxWidth else maxHeight
-        val logoSize = (minDim * 0.72f).coerceAtLeast(24.dp)
-
-        // Concentric acoustic soundwave rings
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val center = Offset(size.width / 2f, size.height / 2f)
-            val maxR = size.minDimension / 2f
-
-            for (i in 1..4) {
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.06f * i),
-                    radius = (maxR / 4f) * i,
-                    center = center,
-                    style = Stroke(width = 2f)
-                )
-            }
-        }
-
-        // Center Branded Moon & Waveform Emblem
-        Box(
-            modifier = Modifier
-                .size(logoSize)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.4f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                painter = painterResource(id = R.drawable.app_logo),
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(CircleShape),
-                contentScale = ContentScale.Crop
-            )
-        }
-    }
-}
 
 private val GradientPalettes = listOf(
     listOf(Color(0xFF0F172A), Color(0xFF1E293B), Color(0xFF334155)), // Slate Night
@@ -96,3 +28,38 @@ private val GradientPalettes = listOf(
     listOf(Color(0xFF1E3A8A), Color(0xFF1D4ED8), Color(0xFF2563EB)), // Cobalt Blue
     listOf(Color(0xFF7C2D12), Color(0xFF9A3412), Color(0xFFC2410C))  // Rust Copper
 )
+
+private val PrecomputedBrushes = GradientPalettes.map { colors ->
+    Brush.linearGradient(
+        colors = colors,
+        start = Offset(0f, 0f),
+        end = Offset(200f, 200f)
+    )
+}
+
+@Composable
+fun DefaultArtwork(
+    title: String,
+    artist: String,
+    modifier: Modifier = Modifier,
+    cornerRadius: Dp = 12.dp
+) {
+    val paletteIndex = remember(title, artist) {
+        (title.hashCode() + artist.hashCode()).absoluteValue % PrecomputedBrushes.size
+    }
+    val brush = PrecomputedBrushes[paletteIndex]
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(cornerRadius))
+            .background(brush),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            Icons.Default.MusicNote,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.75f),
+            modifier = Modifier.size(24.dp)
+        )
+    }
+}

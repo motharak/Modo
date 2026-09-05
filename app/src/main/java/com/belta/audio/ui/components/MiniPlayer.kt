@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -34,20 +35,59 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.belta.audio.core.domain.model.PlaybackState
 
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.abs
+
 @Composable
 fun MiniPlayer(
     playbackState: PlaybackState,
     onPlayPauseClick: () -> Unit,
     onNextClick: () -> Unit,
     onClick: () -> Unit,
+    onPreviousClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val track = playbackState.currentTrack ?: return
+
+    var totalDragX by remember { mutableFloatStateOf(0f) }
+    var totalDragY by remember { mutableFloatStateOf(0f) }
 
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = {
+                        totalDragX = 0f
+                        totalDragY = 0f
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        totalDragX += dragAmount.x
+                        totalDragY += dragAmount.y
+                    },
+                    onDragEnd = {
+                        val absX = abs(totalDragX)
+                        val absY = abs(totalDragY)
+                        if (totalDragY < -36.dp.toPx() && absY > absX * 1.2f) {
+                            // Swipe UP expands player
+                            onClick()
+                        } else if (absX > 45.dp.toPx() && absX > absY * 1.2f) {
+                            if (totalDragX < 0) {
+                                onNextClick()
+                            } else {
+                                onPreviousClick?.invoke()
+                            }
+                        }
+                    }
+                )
+            }
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -65,22 +105,21 @@ fun MiniPlayer(
                 Box(
                     modifier = Modifier
                         .size(48.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer),
+                        .clip(RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (track.artworkUri != null) {
+                    DefaultArtwork(
+                        title = track.title,
+                        artist = track.artist,
+                        cornerRadius = 10.dp,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    if (!track.artworkUri.isNullOrBlank()) {
                         AsyncImage(
                             model = track.artworkUri,
                             contentDescription = track.album,
-                            modifier = Modifier.size(48.dp),
+                            modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.MusicNote,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
                 }

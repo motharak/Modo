@@ -37,9 +37,12 @@ class MediaStoreScanner(
     val scanProgress: StateFlow<ScanProgressInfo> = _scanProgress.asStateFlow()
 
     suspend fun scanLibrary(minDurationSeconds: Int = 60): Int = withContext(Dispatchers.IO) {
-        _scanProgress.value = ScanProgressInfo(isScanning = true, currentTitle = "Searching audio files...", scannedCount = 0)
+        _scanProgress.value = ScanProgressInfo(isScanning = true, currentTitle = "", scannedCount = 0)
         val tracksToInsert = mutableListOf<TrackEntity>()
         val existingPaths = mutableListOf<String>()
+
+        // 1 Batch query instead of hundreds of sequential queries
+        val existingTracksMap = trackDao.getAllTracks().associateBy { it.path }
 
         val userConfiguredFolders = scanFolderDao.getAllScanFolders().map { it.path }
         val minDurationMs = (minDurationSeconds * 1000L).coerceAtLeast(0L)
@@ -116,13 +119,38 @@ class MediaStoreScanner(
                     }
                     existingPaths.add(path)
 
-                    // Fetch existing record to retain user statistics (favorites, play count)
-                    val existing = trackDao.getTrackByPath(path)
-
+                    val existing = existingTracksMap[path]
                     val artworkUri = ContentUris.withAppendedId(artworkUriBase, albumId).toString()
 
-                    // Extract deep specs
-                    val specs = AudioTagReader.extractSpecs(path, mimeType)
+                    // Fast-path: Reuse existing specs if file was unchanged on disk (avoids heavy file I/O)
+                    val canReuseSpecs = existing != null &&
+                            existing.dateModified == dateModified &&
+                            existing.size == size &&
+                            existing.bitrateKbps > 0
+
+                    val bitrateKbps: Int
+                    val sampleRateHz: Int
+                    val bitDepth: Int
+                    val channels: Int
+                    val isLossless: Boolean
+                    val isHiRes: Boolean
+
+                    if (canReuseSpecs && existing != null) {
+                        bitrateKbps = existing.bitrateKbps
+                        sampleRateHz = existing.sampleRateHz
+                        bitDepth = existing.bitDepth
+                        channels = existing.channels
+                        isLossless = existing.isLossless
+                        isHiRes = existing.isHiRes
+                    } else {
+                        val specs = AudioTagReader.extractSpecs(path, mimeType)
+                        bitrateKbps = specs.bitrateKbps
+                        sampleRateHz = specs.sampleRateHz
+                        bitDepth = specs.bitDepth
+                        channels = specs.channelCount
+                        isLossless = specs.isLossless
+                        isHiRes = specs.isHiRes
+                    }
 
                     val entity = TrackEntity(
                         id = id,
@@ -141,12 +169,12 @@ class MediaStoreScanner(
                         trackNumber = trackNumber,
                         discNumber = discNumber,
                         genre = existing?.genre ?: "",
-                        bitrateKbps = specs.bitrateKbps,
-                        sampleRateHz = specs.sampleRateHz,
-                        bitDepth = specs.bitDepth,
-                        channels = specs.channelCount,
-                        isLossless = specs.isLossless,
-                        isHiRes = specs.isHiRes,
+                        bitrateKbps = bitrateKbps,
+                        sampleRateHz = sampleRateHz,
+                        bitDepth = bitDepth,
+                        channels = channels,
+                        isLossless = isLossless,
+                        isHiRes = isHiRes,
                         playCount = existing?.playCount ?: 0,
                         lastPlayedTimestamp = existing?.lastPlayedTimestamp ?: 0L,
                         isFavorite = existing?.isFavorite ?: false,
@@ -154,10 +182,11 @@ class MediaStoreScanner(
                         artworkUri = artworkUri
                     )
                     tracksToInsert.add(entity)
-                    if (tracksToInsert.size % 4 == 0 || tracksToInsert.size == 1) {
+
+                    if (tracksToInsert.size % 25 == 0 || tracksToInsert.size == 1) {
                         _scanProgress.value = ScanProgressInfo(
                             isScanning = true,
-                            currentTitle = title,
+                            currentTitle = "",
                             scannedCount = tracksToInsert.size
                         )
                     }
